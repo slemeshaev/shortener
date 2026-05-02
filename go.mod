@@ -1,3 +1,3 @@
 module github.com/slemeshaev/shortener
 
-go 1.24.5
+go 1.25.0
