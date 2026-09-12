@@ -9,38 +9,71 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 )
 
-var storage = make(map[string]string)
-
-func main() {
-	run()
+type urlStorage struct {
+	mu   sync.RWMutex
+	urls map[string]string
 }
 
-func run() {
-	http.HandleFunc("/", shortenHandler)
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+func newURLStorage() *urlStorage {
+	return &urlStorage{
+		urls: make(map[string]string),
+	}
+}
+
+func (s *urlStorage) save(id, originalURL string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.urls[id] = originalURL
+}
+
+func (s *urlStorage) get(id string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	originalURL, ok := s.urls[id]
+	return originalURL, ok
+}
+
+var storage = newURLStorage()
+
+func main() {
+	if err := run(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func shortenHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+const (
+	serverAddr = ":8080"
+	baseURL    = "http://localhost:8080"
+)
 
-	if r.Header.Get("Content-Type") != "text/plain" {
-		w.WriteHeader(http.StatusUnsupportedMediaType)
-		return
-	}
+func run() error {
+	http.HandleFunc("/", handleRoot)
+	return http.ListenAndServe(serverAddr, nil)
+}
 
+// handleRoot routes requests based on the method:
+// POST / - shorten a URL, GET /{id} - return a redirect to the original
+func handleRoot(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		handleShorten(w, r)
+	case http.MethodGet:
+		handleRedirect(w, r)
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+	}
+}
+
+func handleShorten(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
 
 	originalURL := strings.TrimSpace(string(body))
 	if originalURL == "" {
@@ -48,18 +81,35 @@ func shortenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortKey := generateShortKey()
-	storage[shortKey] = originalURL
+	id := generateShortID()
+	storage.save(id, originalURL)
 
-	shortURL := fmt.Sprintf("http://localhost:8080/%s", shortKey)
+	shortURL := fmt.Sprintf("%s/%s", baseURL, id)
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(shortURL))
 }
 
-func generateShortKey() string {
-	bytes := make([]byte, 4)
-	rand.Read(bytes)
-	return base64.URLEncoding.EncodeToString(bytes)
+func handleRedirect(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/")
+	if id == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	originalURL, ok := storage.get(id)
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Location", originalURL)
+	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
+func generateShortID() string {
+	b := make([]byte, 6)
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }
