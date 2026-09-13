@@ -12,43 +12,16 @@ import (
 	"sync"
 )
 
-type urlStorage struct {
-	mu   sync.RWMutex
-	urls map[string]string
-}
-
-func newURLStorage() *urlStorage {
-	return &urlStorage{
-		urls: make(map[string]string),
-	}
-}
-
-func (s *urlStorage) save(id, originalURL string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.urls[id] = originalURL
-}
-
-func (s *urlStorage) get(id string) (string, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	originalURL, ok := s.urls[id]
-	return originalURL, ok
-}
-
-var storage = newURLStorage()
+const (
+	serverAddr = ":8080"
+	baseURL    = "http://localhost:8080"
+)
 
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
 }
-
-const (
-	serverAddr = ":8080"
-	baseURL    = "http://localhost:8080"
-)
 
 func run() error {
 	http.HandleFunc("/", handleRoot)
@@ -112,4 +85,31 @@ func generateShortID() string {
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+var storage = newURLStorage()
+
+type urlStorage struct {
+	mu   sync.RWMutex
+	urls map[string]string
+}
+
+func newURLStorage() *urlStorage {
+	return &urlStorage{
+		urls: make(map[string]string),
+	}
+}
+
+func (s *urlStorage) save(id, originalURL string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.urls[id] = originalURL
+}
+
+func (s *urlStorage) get(id string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	originalURL, ok := s.urls[id]
+	return originalURL, ok
 }
